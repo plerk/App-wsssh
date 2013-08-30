@@ -1,0 +1,71 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use v5.10;
+use AnyEvent;
+use AnyEvent::Handle;
+use AnyEvent::WebSocket::Client;
+use JSON qw( from_json to_json );
+
+unless(@ARGV >= 2)
+{
+  say STDERR "usage: $0 URI command";
+  exit 2;
+}
+
+my $client = AnyEvent::WebSocket::Client->new;
+my $connection = $client->connect(shift @ARGV)->recv;
+
+$connection->send(to_json(\@ARGV));
+
+$connection->on_each_message(sub {
+  my $message = from_json(shift);
+  
+  if($message->{error})
+  {
+    die $message->{error};
+  }
+  
+  if(defined $message->{stdout})
+  {
+    print STDOUT $message->{stdout};
+  }
+
+  if(defined $message->{stderr})
+  {
+    print STDERR $message->{stderr};
+  }
+
+  if($message->{signal})
+  {
+    kill $message->{signal}, $$;
+  }
+  
+  if(defined $message->{exit})
+  {
+    exit $message->{exit};
+  }
+
+});
+
+my $stdin = AnyEvent::Handle->new(
+  fh => \*STDIN,
+);
+
+$stdin->on_read(sub {
+  $stdin->push_read(sub {
+    $connection->send(to_json({ stdin => $_[0]{rbuf} }));
+    $_[0]{rbuf} = '';
+  });
+});
+
+$stdin->on_error(sub {
+  $connection->send(to_json({ close => 1 }));
+});
+
+$stdin->on_eof(sub {
+  $connection->send(to_json({ close => 1 }));
+});
+
+AnyEvent->condvar->recv;

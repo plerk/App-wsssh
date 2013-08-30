@@ -1,0 +1,61 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use v5.10;
+use EV;
+use Mojolicious::Lite;
+use AnyEvent::Open3::Simple;
+use JSON qw( from_json to_json );
+
+websocket '/wsssh.json' => sub {
+  my $self = shift;
+  my $ipc = AnyEvent::Open3::Simple->new(
+    raw       => 1,
+    on_start  => sub {
+      my $proc = shift;
+      $self->on(message => sub {
+        my($self, $message) = @_;
+        my $payload = eval { from_json($message) };
+        #use YAML ();
+        #say YAML::Dump($payload);
+        return unless ref($payload) eq 'HASH';
+        if(defined $payload->{stdin})
+        {
+          #$DB::single = 1;
+          $proc->print($payload->{stdin});
+        }
+        if($payload->{close})
+        {
+          $proc->close;
+        }
+      });
+    },
+    on_stdout => sub {
+      my($proc, $data) = @_;
+      $self->send(to_json({ stdout => $data }));
+    },
+    on_stderr => sub {
+      my($proc, $data) = @_;
+      $self->send(to_json({ stderr => $data }));
+    },
+    on_exit   => sub {
+      $self->send(to_json({ exit => $_[1], signal => $_[2] }));
+      $self->finish;
+    },
+    on_error  => sub {
+      $self->send(to_json({ error => $_[0] }));
+      $self->finish;
+    },
+  );
+
+  $self->on(message => sub {
+    my($self, $message) = @_;
+    my $payload = eval { from_json($message) };
+    return unless ref($payload) eq 'ARRAY';
+    $ipc->run(@$payload);
+    say "command: " . join(' ', @$payload);
+  });
+};
+
+app->start;
