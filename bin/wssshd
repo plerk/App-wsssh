@@ -8,6 +8,10 @@ use Mojolicious::Lite;
 use AnyEvent::Open3::Simple;
 use JSON qw( from_json to_json );
 
+# PODNAME: wssshd
+# ABSTRACT: WebSoket Secure SHell Daemon
+# VERSION
+
 websocket '/wsssh.json' => sub {
   my $self = shift;
   my $proc;
